@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,8 +56,8 @@ type PhpFpmPool struct {
 }
 
 type PhpFpmPoolExporter struct {
-	poolsToMonitor                                                                                 []*PhpFpmPool
-	listenQueue, listenQueueLen, idleProcesses, activeProcesses, totalProcesses                    *prometheus.GaugeVec
+	poolsToMonitor                                                                                     []*PhpFpmPool
+	listenQueue, listenQueueLen, idleProcesses, activeProcesses, totalProcesses                        *prometheus.GaugeVec
 	startSince, acceptedConn, maxListenQueue, maxActiveProcesses, maxChildrenReached, slowRequests, up *prometheus.CounterVec
 }
 
@@ -265,37 +266,6 @@ func NewPhpFpmPoolExporter(pools []*PhpFpmPool) *PhpFpmPoolExporter {
 	}
 }
 
-func GetFilesIn(dirPath string) []string {
-	var poolFiles []string
-
-	if strings.HasSuffix(dirPath, "/") {
-		dirPath = strings.TrimRight(dirPath, "/")
-	}
-
-	dir, err := os.Open(dirPath)
-
-	if err != nil {
-		fmt.Errorf("%s", err)
-		return nil
-	}
-	defer dir.Close()
-
-	filesInfo, err := dir.Readdir(-1)
-
-	if err != nil {
-		fmt.Errorf("%s", err)
-		return nil
-	}
-
-	for i := 0; i < len(filesInfo); i++ {
-		if filesInfo[i].Mode().IsRegular() {
-			poolFiles = append(poolFiles, dirPath+"/"+filesInfo[i].Name())
-		}
-	}
-
-	return poolFiles
-}
-
 func PollFpmStatusMetrics(p *PhpFpmPool, fetcher func() (string, error), pollInterval int, mustQuit chan bool, done chan bool) {
 
 	var mts FpmPoolMetrics
@@ -458,7 +428,7 @@ func main() {
 		listenAddress       = flag.String("web.listen-address", ":9101", "Address to listen on for web interface and telemetry.")
 		metricsPath         = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 		phpfpmPidFile       = flag.String("phpfpm.pid-file", "/var/run/php5-fpm.pid", "Path to phpfpm's pid file.")
-		configDir           = flag.String("phpfpm.config", "/etc/php5/fpm/pool.d/", "Pools conf dir")
+		configGlob          = flag.String("phpfpm.config", "/etc/php5/fpm/pool.d/*.conf", "Pools conf dir")
 		pollInterval        = flag.Int("phpfpm.poll-interval", 10, "Poll interval in seconds")
 		useNativeClient     = flag.Bool("phpfpm.use-native-client", true, "Use a native go client to get status or use external cgi-fcgi command")
 		ncConnectTimeout    = flag.Int("nc.connect-timeout", 500, "Native client connect timeout in ms")
@@ -506,7 +476,7 @@ func main() {
 
 	phpFpmPools := []*PhpFpmPool{}
 
-	confFiles := GetFilesIn(*configDir)
+	confFiles, _ := filepath.Glob(*configGlob)
 	cfg := ini.Empty()
 
 	for _, cf := range confFiles {
